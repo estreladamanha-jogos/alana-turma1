@@ -52,6 +52,7 @@
 
 <div id="wrap">
   <div id="hud">
+    <div class="stat" id="livesStat">❤️❤️❤️</div>
     <div class="stat">🪙 <b id="coinVal">0</b></div>
     <div id="progress"><div id="progressFill"></div><div id="progressIcon">🛹</div></div>
     <div class="stat">🏁 <b id="pctVal">0</b>%</div>
@@ -98,6 +99,19 @@ let distance = 0;
 let time = 0;
 let gameOver = false;
 let coinCount = 0;
+
+// ---------- Vidas e invencibilidade ----------
+const MAX_LIVES = 3;
+const INVINCIBLE_TIME = 1.5; // segundos piscando após uma batida
+let lives = MAX_LIVES;
+let invincible = false;
+let invTimer = 0;
+let hitEffects = []; // corações partidos aparecendo na cabeça do skatista
+
+function updateLivesHUD() {
+  document.getElementById('livesStat').textContent =
+    '❤️'.repeat(Math.max(0, lives)) + '🖤'.repeat(Math.max(0, MAX_LIVES - lives));
+}
 
 // ---------- Perspectiva ----------
 function sc(d) { return FOCAL / (FOCAL + Math.max(d, -FOCAL*0.6)); }
@@ -178,6 +192,13 @@ function update(dt) {
 
   player.lane += (player.targetLane - player.lane) * Math.min(1, dt * 14);
 
+  if (invincible) {
+    invTimer += dt;
+    if (invTimer >= INVINCIBLE_TIME) { invincible = false; invTimer = 0; }
+  }
+  for (const e of hitEffects) e.t += dt;
+  hitEffects = hitEffects.filter(e => e.t < 0.6);
+
   if (!player.onGround) {
     player.vy -= GRAVITY * dt;
     player.jumpY += player.vy * dt;
@@ -200,19 +221,22 @@ function update(dt) {
     spawnObstacle();
   }
 
-  for (const o of obstacles) {
-    const d = o.d - distance;
-    if (d < 1.2 && d > -1.5 && Math.abs(player.lane - o.lane) < 0.6) {
-      if (o.type === 'caminhao') {
-        crashGame('Você bateu no caminhão de lixo! Só dava pra desviar de pista.');
-        return;
-      }
-      if (o.type === 'pneu' && player.jumpY < 40) {
-        crashGame('Você bateu no pneu! Dava pra pular por cima dele.');
-        return;
+  if (!invincible) {
+    for (const o of obstacles) {
+      const d = o.d - distance;
+      if (d < 1.2 && d > -1.5 && Math.abs(player.lane - o.lane) < 0.6) {
+        if (o.type === 'caminhao') {
+          hitObstacle();
+          break;
+        }
+        if (o.type === 'pneu' && player.jumpY < 40) {
+          hitObstacle();
+          break;
+        }
       }
     }
   }
+  if (gameOver) return;
 
   const pct = Math.min(100, distance / TRACK_LENGTH * 100);
   document.getElementById('progressFill').style.width = pct + '%';
@@ -235,17 +259,35 @@ function crashGame(motivo) {
   document.getElementById('overlay').classList.add('show');
 }
 
+function hitObstacle() {
+  if (invincible) return;
+  lives--;
+  updateLivesHUD();
+  hitEffects.push({ t: 0 });
+  if (lives <= 0) {
+    crashGame('Você perdeu todas as vidas!');
+  } else {
+    invincible = true;
+    invTimer = 0;
+  }
+}
+
 function restart() {
   speed = START_SPEED;
   distance = 0; time = 0;
   coinCount = 0;
   gameOver = false;
+  lives = MAX_LIVES;
+  invincible = false;
+  invTimer = 0;
+  hitEffects = [];
   player.lane = player.targetLane = 1;
   player.jumpY = 0; player.vy = 0; player.onGround = true;
   buildCoins();
   obstacles = [];
   spawnTimer = 0;
   document.getElementById('coinVal').textContent = 0;
+  updateLivesHUD();
   document.getElementById('overlay').classList.remove('show');
 }
 
@@ -543,6 +585,7 @@ function drawPlayer() {
   const bob = player.onGround ? Math.sin(time*16) * 1.6 : 0;
   const lean = (player.targetLane - player.lane) * 0.28;
   const air = jy > 4;
+  const blinkOff = invincible && Math.floor(time * 14) % 2 === 0;
 
   // sombra
   ctx.save();
@@ -550,6 +593,8 @@ function drawPlayer() {
   ctx.fillStyle = '#000';
   ctx.beginPath(); ctx.ellipse(x, BASE_Y + 12, 48 - jy*0.1, 11 - jy*0.02, 0, 0, Math.PI*2); ctx.fill();
   ctx.restore();
+
+  if (blinkOff) return; // piscando: nesse quadro o skatista some por um instante
 
   ctx.save();
   ctx.translate(x, BASE_Y - jy + bob);
@@ -611,6 +656,21 @@ function drawPlayer() {
   ctx.restore();
 }
 
+function drawHitEffects() {
+  if (hitEffects.length === 0) return;
+  const x = laneX(player.lane, 0);
+  const y = BASE_Y - player.jumpY - 190;
+  for (const e of hitEffects) {
+    const p = e.t / 0.6;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, 1 - p);
+    ctx.font = `${28 + p*12}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('💔', x, y - p*30);
+    ctx.restore();
+  }
+}
+
 // ---------- Desenho: tudo junto ----------
 function draw() {
   drawSky();
@@ -620,6 +680,7 @@ function draw() {
   for (let i = coins.length - 1; i >= 0; i--) drawCoin(coins[i]);
   for (let i = obstacles.length - 1; i >= 0; i--) drawObstacle(obstacles[i]);
   drawPlayer();
+  drawHitEffects();
 }
 
 // ---------- Loop principal ----------
