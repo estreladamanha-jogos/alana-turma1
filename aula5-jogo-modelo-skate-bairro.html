@@ -168,6 +168,19 @@ function spawnObstacle() {
   obstacles = obstacles.filter(o => o.d > distance - 20);
 }
 
+// ---------- Meteoros ----------
+// avisa com ⚠️ e um X na pista por 1s, depois cai com efeito de impacto.
+const METEOR_INTERVAL = 5;      // segundos entre cada meteoro
+const METEOR_WARN_TIME = 1;     // aviso antes de cair
+const METEOR_FALL_TIME = 0.45;  // tempo caindo do céu até o chão
+const METEOR_IMPACT_TIME = 0.4; // duração do efeito de impacto
+let meteorTimer = 0;
+let meteors = [];
+
+function spawnMeteor() {
+  meteors.push({ lane: Math.floor(Math.random() * 3), t: 0, phase: 'aviso' });
+}
+
 // ---------- Controle ----------
 const keys = {};
 window.addEventListener('keydown', e => {
@@ -238,6 +251,30 @@ function update(dt) {
   }
   if (gameOver) return;
 
+  meteorTimer += dt;
+  if (meteorTimer >= METEOR_INTERVAL) {
+    meteorTimer -= METEOR_INTERVAL;
+    spawnMeteor();
+  }
+
+  for (const m of meteors) {
+    m.t += dt;
+    if (m.phase === 'aviso' && m.t >= METEOR_WARN_TIME) {
+      m.phase = 'caindo';
+      m.t = 0;
+    } else if (m.phase === 'caindo' && m.t >= METEOR_FALL_TIME) {
+      m.phase = 'impacto';
+      m.t = 0;
+      if (!invincible && Math.abs(player.lane - m.lane) < 0.6) {
+        hitObstacle();
+      }
+    } else if (m.phase === 'impacto' && m.t >= METEOR_IMPACT_TIME) {
+      m.phase = 'fim';
+    }
+  }
+  meteors = meteors.filter(m => m.phase !== 'fim');
+  if (gameOver) return;
+
   const pct = Math.min(100, distance / TRACK_LENGTH * 100);
   document.getElementById('progressFill').style.width = pct + '%';
   document.getElementById('progressIcon').style.left = pct + '%';
@@ -286,6 +323,8 @@ function restart() {
   buildCoins();
   obstacles = [];
   spawnTimer = 0;
+  meteors = [];
+  meteorTimer = 0;
   document.getElementById('coinVal').textContent = 0;
   updateLivesHUD();
   document.getElementById('overlay').classList.remove('show');
@@ -656,6 +695,72 @@ function drawPlayer() {
   ctx.restore();
 }
 
+function drawMeteors() {
+  for (const m of meteors) {
+    const x = laneX(m.lane, 0);
+    const groundY = gy(0);
+
+    if (m.phase === 'aviso') {
+      const pulse = 0.7 + Math.abs(Math.sin(m.t * 10)) * 0.3;
+
+      // aviso de perigo no céu
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.font = '34px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('⚠️', x, HORIZON - 26);
+      ctx.restore();
+
+      // X vermelho marcando onde vai cair
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = '#ff2d2d';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      const r = 22;
+      ctx.beginPath(); ctx.moveTo(x - r, groundY - r*0.6); ctx.lineTo(x + r, groundY + r*0.6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + r, groundY - r*0.6); ctx.lineTo(x - r, groundY + r*0.6); ctx.stroke();
+      ctx.restore();
+    } else if (m.phase === 'caindo') {
+      const p = m.t / METEOR_FALL_TIME;
+      const y = 10 + (groundY - 10) * p;
+      const size = 16 + p * 14;
+
+      // rastro de fogo
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = '#ffb347'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(x, Math.max(0, y - size*2)); ctx.lineTo(x, 0); ctx.stroke();
+      ctx.restore();
+
+      // meteoro
+      ctx.save();
+      ctx.shadowColor = '#ff6a00'; ctx.shadowBlur = 18;
+      const g = ctx.createRadialGradient(x - size*0.3, y - size*0.3, 2, x, y, size);
+      g.addColorStop(0, '#ffe066'); g.addColorStop(0.5, '#ff8c1a'); g.addColorStop(1, '#8a2a00');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    } else if (m.phase === 'impacto') {
+      const p = m.t / METEOR_IMPACT_TIME;
+
+      // onda de choque
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - p);
+      ctx.strokeStyle = '#ff8c1a'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(x, groundY, 20 + p*55, 0, Math.PI*2); ctx.stroke();
+      ctx.restore();
+
+      // poeira e cratera
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 0.6 - p*0.5);
+      ctx.fillStyle = '#4a3423';
+      ctx.beginPath(); ctx.ellipse(x, groundY, 34 + p*18, 10 + p*5, 0, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
 function drawHitEffects() {
   if (hitEffects.length === 0) return;
   const x = laneX(player.lane, 0);
@@ -679,6 +784,7 @@ function draw() {
   drawFinish();
   for (let i = coins.length - 1; i >= 0; i--) drawCoin(coins[i]);
   for (let i = obstacles.length - 1; i >= 0; i--) drawObstacle(obstacles[i]);
+  drawMeteors();
   drawPlayer();
   drawHitEffects();
 }
