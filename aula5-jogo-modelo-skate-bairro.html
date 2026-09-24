@@ -123,6 +123,37 @@ function buildCoins() {
 }
 buildCoins();
 
+// ---------- Obstáculos ----------
+// pneu: pequeno, dá pra pular por cima. caminhão de lixo: grande, só desviando de pista.
+const SPAWN_INTERVAL = 1.2;   // segundos entre cada obstáculo novo
+const SPAWN_DIST = MAX_D + 15; // nasce um pouco além do que dá pra ver
+const SAFE_WINDOW = 14;        // "mesmo trecho da rua", em metros
+let obstacles = [];
+let spawnTimer = 0;
+
+function spawnObstacle() {
+  const spawnD = distance + SPAWN_DIST;
+
+  // pistas já ocupadas perto desse trecho
+  const blockedLanes = new Set();
+  for (const o of obstacles) {
+    if (Math.abs(o.d - spawnD) < SAFE_WINDOW) blockedLanes.add(o.lane);
+  }
+
+  let lane = Math.floor(Math.random() * 3);
+  if (blockedLanes.size >= 2 && !blockedLanes.has(lane)) {
+    // bloquearia as 3 pistas: reaproveita uma pista já ocupada nesse trecho
+    const opcoes = [...blockedLanes];
+    lane = opcoes[Math.floor(Math.random() * opcoes.length)];
+  }
+
+  const type = Math.random() < 0.5 ? 'pneu' : 'caminhao';
+  obstacles.push({ d: spawnD, lane, type });
+
+  // limpa obstáculos bem pra trás, pra lista não crescer à toa
+  obstacles = obstacles.filter(o => o.d > distance - 20);
+}
+
 // ---------- Controle ----------
 const keys = {};
 window.addEventListener('keydown', e => {
@@ -163,6 +194,26 @@ function update(dt) {
     }
   }
 
+  spawnTimer += dt;
+  if (spawnTimer >= SPAWN_INTERVAL) {
+    spawnTimer -= SPAWN_INTERVAL;
+    spawnObstacle();
+  }
+
+  for (const o of obstacles) {
+    const d = o.d - distance;
+    if (d < 1.2 && d > -1.5 && Math.abs(player.lane - o.lane) < 0.6) {
+      if (o.type === 'caminhao') {
+        crashGame('Você bateu no caminhão de lixo! Só dava pra desviar de pista.');
+        return;
+      }
+      if (o.type === 'pneu' && player.jumpY < 40) {
+        crashGame('Você bateu no pneu! Dava pra pular por cima dele.');
+        return;
+      }
+    }
+  }
+
   const pct = Math.min(100, distance / TRACK_LENGTH * 100);
   document.getElementById('progressFill').style.width = pct + '%';
   document.getElementById('progressIcon').style.left = pct + '%';
@@ -177,6 +228,13 @@ function winGame() {
   document.getElementById('overlay').classList.add('show');
 }
 
+function crashGame(motivo) {
+  gameOver = true;
+  document.getElementById('overlayTitle').textContent = '💥 GAME OVER!';
+  document.getElementById('overlayText').textContent = motivo;
+  document.getElementById('overlay').classList.add('show');
+}
+
 function restart() {
   speed = START_SPEED;
   distance = 0; time = 0;
@@ -185,6 +243,8 @@ function restart() {
   player.lane = player.targetLane = 1;
   player.jumpY = 0; player.vy = 0; player.onGround = true;
   buildCoins();
+  obstacles = [];
+  spawnTimer = 0;
   document.getElementById('coinVal').textContent = 0;
   document.getElementById('overlay').classList.remove('show');
 }
@@ -400,6 +460,60 @@ function drawCoin(c) {
   ctx.restore();
 }
 
+function drawTire(x, y, s) {
+  const rx = 26*s, ry = 16*s;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,.3)';
+  ctx.beginPath(); ctx.ellipse(x, y + 2*s, rx*0.9, ry*0.5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#222';
+  ctx.beginPath(); ctx.ellipse(x, y - ry*0.6, rx, ry, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#666';
+  ctx.beginPath(); ctx.ellipse(x, y - ry*0.6, rx*0.45, ry*0.45, 0, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#000'; ctx.lineWidth = Math.max(1, 2*s);
+  ctx.beginPath(); ctx.ellipse(x, y - ry*0.6, rx, ry, 0, 0, Math.PI*2); ctx.stroke();
+  ctx.restore();
+}
+
+function drawTruck(x, y, s) {
+  const w = 130*s, h = 118*s, cabW = 46*s;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,.32)';
+  ctx.beginPath(); ctx.ellipse(x, y + 4*s, w*0.55, 12*s, 0, 0, Math.PI*2); ctx.fill();
+
+  const body = ctx.createLinearGradient(x - w/2, y - h, x - w/2, y);
+  body.addColorStop(0, '#4caf50'); body.addColorStop(1, '#2e7d32');
+  ctx.fillStyle = body;
+  ctx.fillRect(x - w/2, y - h, w - cabW, h);
+  ctx.strokeStyle = '#1b5e20'; ctx.lineWidth = Math.max(1, 2*s);
+  ctx.strokeRect(x - w/2, y - h, w - cabW, h);
+
+  ctx.fillStyle = '#37474f';
+  ctx.fillRect(x + w/2 - cabW, y - h*0.72, cabW, h*0.72);
+  ctx.fillStyle = '#90caf9';
+  ctx.fillRect(x + w/2 - cabW + 5*s, y - h*0.6, cabW - 10*s, h*0.26);
+  ctx.fillStyle = '#ffe066';
+  ctx.beginPath(); ctx.arc(x + w/2 - 6*s, y - 8*s, 6*s, 0, Math.PI*2); ctx.fill();
+
+  ctx.fillStyle = '#111';
+  ctx.beginPath(); ctx.arc(x - w/2 + 22*s, y + 2*s, 14*s, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + w/2 - 18*s, y + 2*s, 14*s, 0, Math.PI*2); ctx.fill();
+
+  ctx.fillStyle = '#ffd23f';
+  ctx.font = `bold ${Math.max(6, 11*s)}px 'Press Start 2P', monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText('LIXO', x - cabW/2, y - h*0.4);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+function drawObstacle(o) {
+  const d = o.d - distance;
+  if (d < -2 || d > MAX_D) return;
+  const s = sc(d), x = laneX(o.lane, d), y = gy(d);
+  if (o.type === 'pneu') drawTire(x, y, s);
+  else drawTruck(x, y, s);
+}
+
 function drawFinish() {
   const d = TRACK_LENGTH - distance;
   if (d > MAX_D || d < -3) return;
@@ -504,6 +618,7 @@ function draw() {
   drawScenery();
   drawFinish();
   for (let i = coins.length - 1; i >= 0; i--) drawCoin(coins[i]);
+  for (let i = obstacles.length - 1; i >= 0; i--) drawObstacle(obstacles[i]);
   drawPlayer();
 }
 
