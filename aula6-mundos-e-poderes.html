@@ -117,6 +117,10 @@ const BASE_V = 230;             // velocidade da queda (pixels por segundo)
 const META = 1000;              // metros até vencer (1000m = 4 mundos de 250m)
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rnd = (a, b) => a + Math.random() * (b - a);
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
 
 let estado = 'inicio';          // inicio | jogando | gameover | vitoria
 let t = 0, dist = 0, vel = BASE_V;
@@ -133,13 +137,15 @@ const WORLDS = [
   { name: 'VULCÃO DO PESADELO',             top: '#7a3318', mid: '#5c1c10', bottom: '#2c0906', ring: '#ff9a4d' },
   { name: 'ESPAÇO DAS ESTRELAS FANTASMAS',  top: '#241a42', mid: '#170f2c', bottom: '#0a0616', ring: '#c9a8ff' }
 ];
-let worldIdx = 0, ring = null, worldNameT = 0;
+let worldIdx = 0, worldNameT = 0;
 let amb = [], ambT = .4, ufo = null, ufoT = rnd(6, 12);
+let portal = null, proximoLimite = 250;   // portal = { y, targetWorld, t, cruzado }
 
 function resetar() {
   estado = 'jogando'; t = 0; dist = 0; vidas = 3; invenc = 0; cristais = 0; shake = 0;
   jog.x = W / 2; jog.vx = 0; obst = []; gems = []; fx = []; spawnT = 1; gemT = 1;
-  worldIdx = 0; ring = null; worldNameT = 0; amb = []; ambT = .4; ufo = null; ufoT = rnd(6, 12);
+  worldIdx = 0; worldNameT = 0; amb = []; ambT = .4; ufo = null; ufoT = rnd(6, 12);
+  portal = null; proximoLimite = 250;
 }
 
 /* ---------- obstáculos ---------- */
@@ -306,18 +312,23 @@ function update(dt) {
   jog.vx += (ax * 300 - jog.vx) * Math.min(1, dt * 10);
   jog.x = clamp(jog.x + jog.vx * dt, 34, W - 34);
 
-  // ---- mundos: portais a cada 250 m ----
+  // ---- portal negro: nasce a cada 250 m, o mundo só troca quando o Fagulha o atravessa ----
   const metros = dist / 10;
-  const novoMundo = Math.min(WORLDS.length - 1, Math.floor(metros / 250));
-  if (novoMundo !== worldIdx) {
-    worldIdx = novoMundo;
-    ring = { y: H + 40, t: 0 };
-    worldNameT = 2.2;
+  if (!portal && proximoLimite <= 750 && metros >= proximoLimite) {
+    const alvo = Math.min(WORLDS.length - 1, Math.floor(proximoLimite / 250));
+    portal = { y: H + 70, targetWorld: alvo, t: 0, cruzado: false };
+    proximoLimite += 250;
   }
-  if (ring) {
-    ring.t += dt;
-    ring.y = (H + 40) - (ring.t / 1.1) * (H + 120);
-    if (ring.t >= 1.1) ring = null;
+  if (portal) {
+    portal.t += dt;
+    portal.y -= vel * dt;
+    if (!portal.cruzado && portal.y <= PY + 6) {
+      portal.cruzado = true;
+      worldIdx = portal.targetWorld;
+      worldNameT = 2.4;
+      burst(W / 2, PY, WORLDS[worldIdx].ring, 46, 240);
+    }
+    if (portal.y < -150) portal = null;
   }
   if (worldNameT > 0) worldNameT -= dt;
 
@@ -405,16 +416,56 @@ function fundo() {
   if (worldIdx === 3 && ufo) desenharUfo();
 }
 
-function desenharAnel() {
-  if (!ring) return;
-  const wd = WORLDS[worldIdx];
-  const al = clamp(1 - ring.t / 1.1, 0, 1);
-  c.save(); c.globalAlpha = al;
-  const grad = c.createLinearGradient(0, ring.y - 14, 0, ring.y + 14);
-  grad.addColorStop(0, 'rgba(255,255,255,0)'); grad.addColorStop(.5, wd.ring); grad.addColorStop(1, 'rgba(255,255,255,0)');
-  c.fillStyle = grad; c.fillRect(0, ring.y - 14, W, 28);
-  c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.moveTo(0, ring.y); c.lineTo(W, ring.y); c.stroke();
+function desenharPortal(p) {
+  const wd = WORLDS[p.targetWorld];
+  const y = p.y, pulso = 1 + Math.sin(p.t * 5) * .06;
+
+  // névoa colorida ao redor do portal
+  const halo = c.createRadialGradient(W / 2, y, 20, W / 2, y, 175 * pulso);
+  halo.addColorStop(0, hexA(wd.ring, .32)); halo.addColorStop(1, hexA(wd.ring, 0));
+  c.fillStyle = halo; c.fillRect(0, y - 190, W, 380);
+
+  c.save(); c.translate(W / 2, y); c.scale(1, .34);
+  const rx = 168 * pulso, rIn = rx * .74;
+
+  // anel externo brilhante
+  const grOut = c.createRadialGradient(0, 0, rx * .6, 0, 0, rx);
+  grOut.addColorStop(0, 'rgba(0,0,0,0)'); grOut.addColorStop(.75, hexA(wd.ring, .95)); grOut.addColorStop(1, hexA(wd.ring, 0));
+  c.fillStyle = grOut; c.beginPath(); c.arc(0, 0, rx, 0, 7); c.fill();
+
+  // vórtice negro (o "portão")
+  const grIn = c.createRadialGradient(0, 0, 4, 0, 0, rIn);
+  grIn.addColorStop(0, '#000'); grIn.addColorStop(.7, '#050008'); grIn.addColorStop(1, hexA(wd.ring, .6));
+  c.fillStyle = grIn; c.beginPath(); c.arc(0, 0, rIn, 0, 7); c.fill();
+
+  // espirais girando dentro do portal
+  c.strokeStyle = hexA(wd.ring, .8); c.lineWidth = 3;
+  for (let i = 0; i < 3; i++) {
+    c.save(); c.rotate(p.t * 2 + i * 2.094);
+    c.beginPath();
+    for (let a = 0; a < 6.283; a += .25) { const rr = (a / 6.283) * rIn, xx = Math.cos(a) * rr, yy = Math.sin(a) * rr; if (a === 0) c.moveTo(xx, yy); else c.lineTo(xx, yy); }
+    c.stroke(); c.restore();
+  }
   c.restore();
+
+  // raios saindo da borda
+  c.strokeStyle = hexA(wd.ring, .9); c.lineWidth = 2.4;
+  for (let i = 0; i < 8; i++) {
+    if (Math.sin(p.t * 9 + i * 3) > .8) {
+      const ang = (i / 8) * 6.283 + p.t;
+      const x1 = W / 2 + Math.cos(ang) * 150, y1 = y + Math.sin(ang) * 46;
+      const x2 = W / 2 + Math.cos(ang) * 178, y2 = y + Math.sin(ang) * 56;
+      c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+    }
+  }
+
+  // partículas sendo sugadas pro portal
+  for (let i = 0; i < 12; i++) {
+    const a = p.t * 3 + i * .52, d = 55 + (i * 13 + p.t * 46) % 105;
+    const px = W / 2 + Math.cos(a) * d, py = y + Math.sin(a) * d * .34;
+    c.fillStyle = hexA(wd.ring, clamp(1 - d / 115, 0, 1));
+    c.beginPath(); c.arc(px, py, 2.6, 0, 7); c.fill();
+  }
 }
 function desenharNomeMundo() {
   if (worldNameT <= 0) return;
@@ -435,6 +486,7 @@ function desenhar() {
     c.fillStyle = '#fff'; c.beginPath(); c.moveTo(-1, -8); c.lineTo(3, -1); c.lineTo(-3, -1); c.fill(); c.restore();
   }
   for (const o of obst) desenharObstaculo(o);
+  if (portal) desenharPortal(portal);
 
   // ---- o Fagulha ----
   const piscando = invenc > 0 && Math.floor(t * 14) % 2 === 0;
@@ -445,7 +497,6 @@ function desenhar() {
   }
   for (const p of fx) { c.globalAlpha = clamp(p.life / p.max, 0, 1); c.fillStyle = p.cor; c.beginPath(); c.arc(p.x, p.y, p.r, 0, 7); c.fill(); }
   c.globalAlpha = 1;
-  desenharAnel();
   desenharNomeMundo();
   c.restore();
   hud();
