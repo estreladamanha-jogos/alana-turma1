@@ -144,8 +144,11 @@ let flashT = 0;
 
 /* ---------- poderes ---------- */
 const DASH_CD_MAX = 3, WIND_CD_MAX = 4.5, DASH_DUR = .22;
+const SHIELD_CD_MAX = 8, SHIELD_DUR = 5;
 let dashCD = 0, dashing = false, dashT = 0, dashDir = 1;
 let windCD = 0, windGustT = 0, windFailT = 0;
+let shieldCD = 0, shieldActive = false, shieldT = 0;
+let poderSel = 'dash';
 
 function resetar() {
   estado = 'jogando'; t = 0; dist = 0; vidas = 3; invenc = 0; cristais = 0; shake = 0;
@@ -154,9 +157,19 @@ function resetar() {
   portal = null; proximoLimite = 250; flashT = 0;
   dashCD = 0; dashing = false; dashT = 0; dashDir = 1;
   windCD = 0; windGustT = 0; windFailT = 0;
+  shieldCD = 0; shieldActive = false; shieldT = 0; poderSel = 'dash';
 }
 
-/* ---------- poderes: dash e vento ---------- */
+/* ---------- poderes: dash, vento e escudo (Q troca, ESPAÇO ativa) ---------- */
+function cyclePoder() {
+  const ordem = ['dash', 'vento', 'escudo'];
+  poderSel = ordem[(ordem.indexOf(poderSel) + 1) % ordem.length];
+}
+function ativarPoder() {
+  if (poderSel === 'dash') tryDash();
+  else if (poderSel === 'vento') tryWind();
+  else tryShield();
+}
 function tryDash() {
   if (dashCD > 0 || dashing) return;
   dashDir = keys.left ? -1 : keys.right ? 1 : jog.dir;
@@ -175,6 +188,11 @@ function tryWind() {
     o.fvy = rnd(160, 300);
     o.frot = 0; o.frotv = rnd(-8, 8);
   }
+}
+function tryShield() {
+  if (shieldCD > 0 || shieldActive) return;
+  shieldActive = true; shieldT = SHIELD_DUR; shieldCD = SHIELD_CD_MAX;
+  burst(jog.x, PY, '#b18cff', 14, 180);
 }
 
 /* ---------- obstáculos: um tipo diferente por mundo ---------- */
@@ -387,8 +405,8 @@ addEventListener('keydown', e => {
   if (estado !== 'jogando') { if (k === 'Space' || k === 'Enter' || k === 'KeyR') resetar(); return; }
   if (k === 'ArrowLeft' || k === 'KeyA') keys.left = true;
   if (k === 'ArrowRight' || k === 'KeyD') keys.right = true;
-  if (k === 'Space' && !e.repeat) tryDash();
-  if (k === 'KeyV' && !e.repeat) tryWind();
+  if (k === 'Space' && !e.repeat) ativarPoder();
+  if (k === 'KeyQ' && !e.repeat) cyclePoder();
 });
 addEventListener('keyup', e => {
   if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
@@ -408,6 +426,8 @@ function update(dt) {
   if (windCD > 0) windCD -= dt;
   if (windGustT > 0) windGustT -= dt;
   if (windFailT > 0) windFailT -= dt;
+  if (shieldCD > 0) shieldCD -= dt;
+  if (shieldActive) { shieldT -= dt; if (shieldT <= 0) shieldActive = false; }
 
   // ---- movimento do Fagulha ----
   const ax = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
@@ -490,6 +510,7 @@ function update(dt) {
     if (o.morto) continue;
     const ox = o.x - o.w * .42, oy = o.y - o.h * .42, ow = o.w * .84, oh = o.h * .84;
     if (hb.x < ox + ow && hb.x + hb.w > ox && hb.y < oy + oh && hb.y + hb.h > oy) {
+      if (shieldActive) { shieldActive = false; o.morto = true; burst(jog.x, PY, '#b18cff', 20, 200); continue; }
       if (imune || invenc > 0 || dashing) continue;
       levarDano(o);
       break;
@@ -608,7 +629,16 @@ function desenhar() {
   if (estado !== 'gameover') {
     drawFagulha(c, jog.x, PY + 12, .42, t, {
       vx: clamp(jog.vx / 300, -1, 1), hit: invenc > 1.2,
-      alpha: piscando ? .3 : 1 });
+      alpha: piscando ? .3 : 1, glow: PODERES_INFO[poderSel].cor });
+  }
+  if (shieldActive) {
+    c.save();
+    c.globalAlpha = .55 + Math.sin(t * 8) * .1;
+    const bg = c.createRadialGradient(jog.x, PY, 5, jog.x, PY, 46);
+    bg.addColorStop(0, 'rgba(177,140,255,0)'); bg.addColorStop(.7, 'rgba(177,140,255,.35)'); bg.addColorStop(1, 'rgba(200,170,255,.05)');
+    c.fillStyle = bg; c.beginPath(); c.arc(jog.x, PY, 46, 0, 7); c.fill();
+    c.strokeStyle = '#b18cff'; c.lineWidth = 2.4; c.beginPath(); c.arc(jog.x, PY, 44, 0, 7); c.stroke();
+    c.restore();
   }
   for (const p of fx) { c.globalAlpha = clamp(p.life / p.max, 0, 1); c.fillStyle = p.cor; c.beginPath(); c.arc(p.x, p.y, p.r, 0, 7); c.fill(); }
   c.globalAlpha = 1;
@@ -655,31 +685,50 @@ function drawIconWind() {
   c.beginPath(); c.moveTo(-10, -4); c.quadraticCurveTo(6, -8, 8, -2); c.stroke();
   c.beginPath(); c.moveTo(-10, 2); c.quadraticCurveTo(8, -2, 10, 6); c.stroke();
 }
+function drawIconEscudo() {
+  c.strokeStyle = '#b18cff'; c.lineWidth = 2.6; c.lineCap = 'round'; c.lineJoin = 'round';
+  c.beginPath();
+  c.moveTo(0, -9); c.lineTo(8, -5); c.lineTo(8, 4); c.quadraticCurveTo(8, 9, 0, 11);
+  c.quadraticCurveTo(-8, 9, -8, 4); c.lineTo(-8, -5); c.closePath();
+  c.stroke();
+}
+const PODERES_INFO = {
+  dash: { label: 'DASH', cor: '#ffe9a8', draw: drawIconDash },
+  vento: { label: 'VENTO', cor: '#7af6ff', draw: drawIconWind },
+  escudo: { label: 'ESCUDO', cor: '#b18cff', draw: drawIconEscudo }
+};
 function desenharPoderes() {
   const y = H - 34;
   const itens = [
-    { x: W / 2 - 46, label: 'ESPAÇO', cd: dashCD, max: DASH_CD_MAX, draw: drawIconDash },
-    { x: W / 2 + 46, label: 'V', cd: windCD, max: WIND_CD_MAX, draw: drawIconWind }
+    { key: 'dash', x: W / 2 - 76, cd: dashCD, max: DASH_CD_MAX },
+    { key: 'vento', x: W / 2, cd: windCD, max: WIND_CD_MAX },
+    { key: 'escudo', x: W / 2 + 76, cd: shieldCD, max: SHIELD_CD_MAX }
   ];
   for (const it of itens) {
+    const info = PODERES_INFO[it.key];
+    const ativo = poderSel === it.key;
+    const raio = ativo ? 24 : 20;
     c.save(); c.translate(it.x, y);
-    c.fillStyle = 'rgba(10,10,24,.6)'; c.beginPath(); c.arc(0, 0, 22, 0, 7); c.fill();
-    c.strokeStyle = 'rgba(255,255,255,.25)'; c.lineWidth = 2; c.stroke();
-    it.draw();
+    c.fillStyle = ativo ? 'rgba(255,255,255,.16)' : 'rgba(10,10,24,.6)';
+    c.beginPath(); c.arc(0, 0, raio, 0, 7); c.fill();
+    c.strokeStyle = ativo ? info.cor : 'rgba(255,255,255,.25)'; c.lineWidth = ativo ? 3 : 2; c.stroke();
+    info.draw();
     if (it.cd > 0) {
       const frac = it.cd / it.max;
       c.fillStyle = 'rgba(0,0,0,.65)';
-      c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, 22, -Math.PI / 2, -Math.PI / 2 + frac * 6.283); c.closePath(); c.fill();
-      c.fillStyle = '#fff'; c.font = 'bold 11px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, raio, -Math.PI / 2, -Math.PI / 2 + frac * 6.283); c.closePath(); c.fill();
+      c.fillStyle = '#fff'; c.font = 'bold 10px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
       c.fillText(it.cd.toFixed(1), 0, 0);
     }
     c.restore();
-    c.fillStyle = '#fff'; c.font = '10px sans-serif'; c.textAlign = 'center';
-    c.fillText(it.label, it.x, y + 34);
+    c.fillStyle = ativo ? info.cor : '#fff'; c.font = (ativo ? 'bold ' : '') + '9px sans-serif'; c.textAlign = 'center';
+    c.fillText(info.label, it.x, y + 32);
   }
+  c.fillStyle = '#fff'; c.font = '9px sans-serif'; c.textAlign = 'center';
+  c.fillText('Q troca · ESPAÇO usa', W / 2, y - 34);
   if (windFailT > 0) {
     c.save(); c.globalAlpha = clamp(windFailT / 1.2, 0, 1);
-    texto('SEM AR NO ESPAÇO!', W / 2, y - 42, 8, '#ff9a4d');
+    texto('SEM AR NO ESPAÇO!', W / 2, y - 50, 8, '#ff9a4d');
     c.restore();
   }
 }
