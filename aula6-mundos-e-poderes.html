@@ -22,7 +22,9 @@ function drawFagulha(c, x, y, s, t, o) {
   const sw = Math.sin(t * 7), sw2 = Math.sin(t * 7 + 1.9);
   const blink = (t % 3.4) > 3.27 ? 0.12 : 1;
   const ear = Math.sin(t * 3.2) * 5;
-  const skinL = hit ? '#f0c4c4' : '#d3cdf0', skinD = hit ? '#d99a9a' : '#9a91c4', line = '#2b2350';
+  const skinL = o.metal ? '#c9d0d4' : (hit ? '#f0c4c4' : '#d3cdf0');
+  const skinD = o.metal ? '#8b959b' : (hit ? '#d99a9a' : '#9a91c4');
+  const line = o.metal ? '#2b2f33' : '#2b2350';
   c.save(); c.translate(x, y); c.scale(s, s);
   if (o.alpha !== undefined) c.globalAlpha = o.alpha;
   c.rotate((o.vx || 0) * 0.16);
@@ -114,7 +116,7 @@ if (!c.roundRect) c.roundRect = function (x, y, w, h) { this.rect(x, y, w, h); }
 const W = 420, H = 640;
 const PY = 190;                 // altura fixa do Fagulha na tela (o cenário é que sobe)
 const BASE_V = 230;             // velocidade da queda (pixels por segundo)
-const META = 1000;              // metros até vencer (1000m = 4 mundos de 250m)
+const META = 1250;              // metros até vencer (1250m = 5 mundos de 250m)
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rnd = (a, b) => a + Math.random() * (b - a);
 function hexA(hex, a) {
@@ -135,7 +137,8 @@ const WORLDS = [
   { name: 'FLORESTA ASSOMBRADA',            top: '#1c2e1a', mid: '#16241a', bottom: '#0a140c', ring: '#8fd48f' },
   { name: 'GELEIRA ASSOMBRADA',             top: '#3a5570', mid: '#25384d', bottom: '#131f2c', ring: '#bfe8ff' },
   { name: 'VULCÃO DO PESADELO',             top: '#7a3318', mid: '#5c1c10', bottom: '#2c0906', ring: '#ff9a4d' },
-  { name: 'ESPAÇO DAS ESTRELAS FANTASMAS',  top: '#241a42', mid: '#170f2c', bottom: '#0a0616', ring: '#c9a8ff' }
+  { name: 'ESPAÇO DAS ESTRELAS FANTASMAS',  top: '#241a42', mid: '#170f2c', bottom: '#0a0616', ring: '#c9a8ff' },
+  { name: 'TORNADO',                        top: '#6b7480', mid: '#4a525c', bottom: '#262b30', ring: '#dfe6ea' }
 ];
 let worldIdx = 0, worldNameT = 0;
 let amb = [], ambT = .4, ufo = null, ufoT = rnd(6, 12);
@@ -148,7 +151,12 @@ const SHIELD_CD_MAX = 8, SHIELD_DUR = 5;
 let dashCD = 0, dashing = false, dashT = 0, dashDir = 1;
 let windCD = 0, windGustT = 0, windFailT = 0;
 let shieldCD = 0, shieldActive = false, shieldT = 0;
+const ANCORA_CD_MAX = 9, ANCORA_DUR = 3;
+let ancoraCD = 0, ancoraActive = false, ancoraT = 0;
 let poderSel = 'dash';
+
+/* ---------- mundo do tornado: vento lateral que troca de lado a cada 5s ---------- */
+let tornadoDir = 1, tornadoT = 5;
 
 function resetar() {
   estado = 'jogando'; t = 0; dist = 0; vidas = 3; invenc = 0; cristais = 0; shake = 0;
@@ -158,17 +166,20 @@ function resetar() {
   dashCD = 0; dashing = false; dashT = 0; dashDir = 1;
   windCD = 0; windGustT = 0; windFailT = 0;
   shieldCD = 0; shieldActive = false; shieldT = 0; poderSel = 'dash';
+  ancoraCD = 0; ancoraActive = false; ancoraT = 0;
+  tornadoDir = 1; tornadoT = 5;
 }
 
 /* ---------- poderes: dash, vento e escudo (Q troca, ESPAÇO ativa) ---------- */
 function cyclePoder() {
-  const ordem = ['dash', 'vento', 'escudo'];
+  const ordem = ['dash', 'vento', 'escudo', 'ancora'];
   poderSel = ordem[(ordem.indexOf(poderSel) + 1) % ordem.length];
 }
 function ativarPoder() {
   if (poderSel === 'dash') tryDash();
   else if (poderSel === 'vento') tryWind();
-  else tryShield();
+  else if (poderSel === 'escudo') tryShield();
+  else tryAncora();
 }
 function tryDash() {
   if (dashCD > 0 || dashing) return;
@@ -193,6 +204,11 @@ function tryShield() {
   if (shieldCD > 0 || shieldActive) return;
   shieldActive = true; shieldT = SHIELD_DUR; shieldCD = SHIELD_CD_MAX;
   burst(jog.x, PY, '#b18cff', 14, 180);
+}
+function tryAncora() {
+  if (ancoraCD > 0 || ancoraActive) return;
+  ancoraActive = true; ancoraT = ANCORA_DUR; ancoraCD = ANCORA_CD_MAX;
+  burst(jog.x, PY, '#c9d0d4', 14, 170);
 }
 
 /* ---------- obstáculos: um tipo diferente por mundo ---------- */
@@ -428,6 +444,8 @@ function update(dt) {
   if (windFailT > 0) windFailT -= dt;
   if (shieldCD > 0) shieldCD -= dt;
   if (shieldActive) { shieldT -= dt; if (shieldT <= 0) shieldActive = false; }
+  if (ancoraCD > 0) ancoraCD -= dt;
+  if (ancoraActive) { ancoraT -= dt; if (ancoraT <= 0) ancoraActive = false; }
 
   // ---- movimento do Fagulha ----
   const ax = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
@@ -439,11 +457,16 @@ function update(dt) {
   } else {
     jog.vx += (ax * 300 - jog.vx) * Math.min(1, dt * 10);
   }
+  if (worldIdx === 4) {
+    tornadoT -= dt;
+    if (tornadoT <= 0) { tornadoDir *= -1; tornadoT = 5; }
+    if (!ancoraActive) jog.vx += tornadoDir * 260 * dt;
+  }
   jog.x = clamp(jog.x + jog.vx * dt, 34, W - 34);
 
   // ---- portal negro: nasce a cada 250 m, o mundo só troca quando o Fagulha o atravessa ----
   const metros = dist / 10;
-  if (!portal && proximoLimite <= 750 && metros >= proximoLimite) {
+  if (!portal && proximoLimite <= 1000 && metros >= proximoLimite) {
     const alvo = Math.min(WORLDS.length - 1, Math.floor(proximoLimite / 250));
     portal = { y: H + 70, targetWorld: alvo, t: 0, cruzado: false };
     proximoLimite += 250;
@@ -629,7 +652,8 @@ function desenhar() {
   if (estado !== 'gameover') {
     drawFagulha(c, jog.x, PY + 12, .42, t, {
       vx: clamp(jog.vx / 300, -1, 1), hit: invenc > 1.2,
-      alpha: piscando ? .3 : 1, glow: PODERES_INFO[poderSel].cor });
+      alpha: piscando ? .3 : 1, metal: ancoraActive,
+      glow: ancoraActive ? '#c9d0d4' : PODERES_INFO[poderSel].cor });
   }
   if (shieldActive) {
     c.save();
@@ -672,7 +696,24 @@ function hud() {
   c.fillStyle = 'rgba(0,0,0,.45)'; c.fillRect(W - 14, 44, 6, 140);
   c.fillStyle = '#7CFF9E'; c.fillRect(W - 14, 44, 6, 140 * pr);
   texto(Math.floor(dist / 10) + ' m', W - 11, 196, 8, '#fff', 'right');
-  if (estado === 'jogando') desenharPoderes();
+  if (estado === 'jogando') { desenharPoderes(); desenharAvisoTornado(); }
+}
+
+/* ---------- aviso de vento do tornado (topo da tela) ---------- */
+function desenharAvisoTornado() {
+  if (worldIdx !== 4) return;
+  const y = 40, piscar = tornadoT < 1.2;
+  c.save();
+  c.globalAlpha = piscar ? (.4 + Math.sin(t * 20) * .4) : .85;
+  c.fillStyle = '#dfe6ea';
+  for (let i = 0; i < 3; i++) {
+    const x = W / 2 + tornadoDir * (i * 18 - 18);
+    c.beginPath();
+    if (tornadoDir > 0) { c.moveTo(x - 9, y - 9); c.lineTo(x + 9, y); c.lineTo(x - 9, y + 9); }
+    else { c.moveTo(x + 9, y - 9); c.lineTo(x - 9, y); c.lineTo(x + 9, y + 9); }
+    c.closePath(); c.fill();
+  }
+  c.restore();
 }
 
 /* ---------- ícones de poderes (recarga) ---------- */
@@ -692,17 +733,26 @@ function drawIconEscudo() {
   c.quadraticCurveTo(-8, 9, -8, 4); c.lineTo(-8, -5); c.closePath();
   c.stroke();
 }
+function drawIconAncora() {
+  c.strokeStyle = '#c9d0d4'; c.lineWidth = 2.6; c.lineCap = 'round'; c.lineJoin = 'round';
+  c.beginPath(); c.arc(0, -6, 3, 0, 7); c.stroke();
+  c.beginPath(); c.moveTo(0, -3); c.lineTo(0, 9); c.stroke();
+  c.beginPath(); c.moveTo(-7, 9); c.quadraticCurveTo(-7, 2, 0, 2); c.quadraticCurveTo(7, 2, 7, 9); c.stroke();
+  c.beginPath(); c.moveTo(-6, -1); c.lineTo(6, -1); c.stroke();
+}
 const PODERES_INFO = {
   dash: { label: 'DASH', cor: '#ffe9a8', draw: drawIconDash },
   vento: { label: 'VENTO', cor: '#7af6ff', draw: drawIconWind },
-  escudo: { label: 'ESCUDO', cor: '#b18cff', draw: drawIconEscudo }
+  escudo: { label: 'ESCUDO', cor: '#b18cff', draw: drawIconEscudo },
+  ancora: { label: 'ÂNCORA', cor: '#c9d0d4', draw: drawIconAncora }
 };
 function desenharPoderes() {
   const y = H - 34;
   const itens = [
-    { key: 'dash', x: W / 2 - 76, cd: dashCD, max: DASH_CD_MAX },
-    { key: 'vento', x: W / 2, cd: windCD, max: WIND_CD_MAX },
-    { key: 'escudo', x: W / 2 + 76, cd: shieldCD, max: SHIELD_CD_MAX }
+    { key: 'dash', x: W / 2 - 111, cd: dashCD, max: DASH_CD_MAX },
+    { key: 'vento', x: W / 2 - 37, cd: windCD, max: WIND_CD_MAX },
+    { key: 'escudo', x: W / 2 + 37, cd: shieldCD, max: SHIELD_CD_MAX },
+    { key: 'ancora', x: W / 2 + 111, cd: ancoraCD, max: ANCORA_CD_MAX }
   ];
   for (const it of itens) {
     const info = PODERES_INFO[it.key];
