@@ -140,26 +140,93 @@ const WORLDS = [
 let worldIdx = 0, worldNameT = 0;
 let amb = [], ambT = .4, ufo = null, ufoT = rnd(6, 12);
 let portal = null, proximoLimite = 250;   // portal = { y, targetWorld, t, cruzado }
+let flashT = 0;
 
 function resetar() {
   estado = 'jogando'; t = 0; dist = 0; vidas = 3; invenc = 0; cristais = 0; shake = 0;
   jog.x = W / 2; jog.vx = 0; obst = []; gems = []; fx = []; spawnT = 1; gemT = 1;
   worldIdx = 0; worldNameT = 0; amb = []; ambT = .4; ufo = null; ufoT = rnd(6, 12);
-  portal = null; proximoLimite = 250;
+  portal = null; proximoLimite = 250; flashT = 0;
 }
 
-/* ---------- obstáculos ---------- */
+/* ---------- obstáculos: um tipo diferente por mundo ---------- */
+const OBST_TIPO = ['lixo', 'boneco', 'fantasmaFogo', 'estrelaFantasma'];
 function criarObstaculo() {
-  obst.push({ tp: 'pedra', x: rnd(50, W - 50), y: H + 40, w: rnd(50, 88), h: rnd(40, 56), sd: Math.random() });
+  obst.push({ tp: OBST_TIPO[worldIdx], x: rnd(50, W - 50), y: H + 40, w: rnd(50, 74), h: rnd(46, 62), sd: Math.random(), seed: rnd(0, 6.283) });
 }
 
 function desenharObstaculo(o) {
   c.save(); c.translate(o.x, o.y);
-  {
-    c.fillStyle = '#6d6a80'; c.strokeStyle = '#34324a'; c.lineWidth = 2.4;
-    c.beginPath(); c.moveTo(-o.w / 2, o.h / 2); c.lineTo(-o.w / 2 + 6, -o.h / 3); c.lineTo(-o.w / 5, -o.h / 2); c.lineTo(o.w / 4, -o.h / 2 + 4);
-    c.lineTo(o.w / 2 - 4, -o.h / 5); c.lineTo(o.w / 2, o.h / 2); c.closePath(); c.fill(); c.stroke();
-    c.fillStyle = 'rgba(255,255,255,.14)'; c.beginPath(); c.moveTo(-o.w / 5, -o.h / 2 + 4); c.lineTo(o.w / 4, -o.h / 2 + 8); c.lineTo(0, -4); c.fill();
+  if (o.tp === 'lixo') {
+    // sacos de lixo jogados na floresta
+    c.fillStyle = '#3a3f46'; c.strokeStyle = '#1c1f24'; c.lineWidth = 2.4;
+    c.beginPath(); c.moveTo(-o.w * .4, o.h * .5); c.quadraticCurveTo(-o.w * .55, -o.h * .1, -o.w * .18, -o.h * .5);
+    c.quadraticCurveTo(0, -o.h * .62, o.w * .2, -o.h * .48); c.quadraticCurveTo(o.w * .55, -o.h * .05, o.w * .4, o.h * .5);
+    c.closePath(); c.fill(); c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,.18)'; c.lineWidth = 2;
+    c.beginPath(); c.moveTo(-o.w * .18, -o.h * .3); c.lineTo(o.w * .12, o.h * .3); c.stroke();
+    c.fillStyle = '#8fa03a';
+    c.beginPath(); c.ellipse(-o.w * .1, o.h * .18, 8, 5, .5, 0, 7); c.fill();
+    c.fillStyle = '#c0392b';
+    c.beginPath(); c.rect(-6, -o.h * .58, 12, 8); c.fill();
+  } else if (o.tp === 'boneco') {
+    // boneco de neve com cara de terror
+    c.fillStyle = '#eef6fb'; c.strokeStyle = '#9db6c4'; c.lineWidth = 2;
+    c.beginPath(); c.arc(0, o.h * .28, o.w * .32, 0, 7); c.fill(); c.stroke();
+    c.beginPath(); c.arc(0, -o.h * .12, o.w * .24, 0, 7); c.fill(); c.stroke();
+    c.strokeStyle = '#3a2a1a'; c.lineWidth = 5;
+    c.beginPath(); c.moveTo(-o.w * .24, -o.h * .2); c.lineTo(-o.w * .5, -o.h * .38); c.stroke();
+    c.beginPath(); c.moveTo(o.w * .24, -o.h * .2); c.lineTo(o.w * .5, -o.h * .02); c.stroke();
+    c.fillStyle = '#e63946';
+    for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(0, o.h * .12 + i * 12, 3, 0, 7); c.fill(); }
+    // rosto de terror
+    c.fillStyle = '#111';
+    c.beginPath(); c.moveTo(-o.w * .13, -o.h * .18); c.lineTo(-o.w * .02, -o.h * .1); c.lineTo(-o.w * .13, -o.h * .02); c.closePath(); c.fill();
+    c.beginPath(); c.moveTo(o.w * .13, -o.h * .18); c.lineTo(o.w * .02, -o.h * .1); c.lineTo(o.w * .13, -o.h * .02); c.closePath(); c.fill();
+    c.fillStyle = '#e67e22';
+    c.beginPath(); c.moveTo(0, -o.h * .06); c.lineTo(o.w * .1, -o.h * .01); c.lineTo(0, o.h * .02); c.closePath(); c.fill();
+    c.strokeStyle = '#111'; c.lineWidth = 2;
+    c.beginPath(); c.moveTo(-o.w * .16, o.h * .14); c.lineTo(-o.w * .08, o.h * .06); c.lineTo(0, o.h * .16); c.lineTo(o.w * .08, o.h * .04); c.lineTo(o.w * .16, o.h * .14); c.stroke();
+  } else if (o.tp === 'fantasmaFogo') {
+    // fantasma de fogo com cara de terror
+    const flick = Math.sin(t * 20 + o.seed) * 3;
+    for (let i = 0; i < 6; i++) {
+      const a = t * 4 + i * 1.1 + o.seed;
+      c.globalAlpha = .55; c.fillStyle = i % 2 ? '#ffb238' : '#ff5722';
+      c.beginPath(); c.arc(Math.cos(a) * o.w * .3, o.h * .3 + Math.sin(a) * 6 - i * 5, 5 - i * .5, 0, 7); c.fill();
+    }
+    c.globalAlpha = 1;
+    const g = c.createLinearGradient(0, -o.h * .5, 0, o.h * .45);
+    g.addColorStop(0, '#ffcf5c'); g.addColorStop(.5, '#ff6a1f'); g.addColorStop(1, '#c0281f');
+    c.fillStyle = g;
+    c.beginPath();
+    c.moveTo(0, -o.h * .5 + flick);
+    c.quadraticCurveTo(o.w * .42, -o.h * .1, o.w * .3, o.h * .35);
+    c.quadraticCurveTo(o.w * .15, o.h * .22, 0, o.h * .45);
+    c.quadraticCurveTo(-o.w * .15, o.h * .22, -o.w * .3, o.h * .35);
+    c.quadraticCurveTo(-o.w * .42, -o.h * .1, 0, -o.h * .5 + flick);
+    c.closePath(); c.fill();
+    c.fillStyle = '#1a0800';
+    c.beginPath(); c.moveTo(-o.w * .16, -o.h * .12); c.lineTo(-o.w * .02, -o.h * .02); c.lineTo(-o.w * .16, o.h * .08); c.closePath(); c.fill();
+    c.beginPath(); c.moveTo(o.w * .16, -o.h * .12); c.lineTo(o.w * .02, -o.h * .02); c.lineTo(o.w * .16, o.h * .08); c.closePath(); c.fill();
+    c.beginPath(); c.ellipse(0, o.h * .2, o.w * .12, o.h * .1, 0, 0, 7); c.fill();
+  } else {
+    // estrela fantasma com cara de terror
+    const pulso = 1 + Math.sin(t * 6 + o.seed) * .08;
+    c.save(); c.rotate(Math.sin(t * 2 + o.seed) * .2); c.scale(pulso, pulso);
+    c.fillStyle = '#e8d9ff'; c.strokeStyle = '#8a6bcf'; c.lineWidth = 2;
+    c.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 === 0 ? o.w * .5 : o.w * .22;
+      const px = Math.cos(a) * r, py = Math.sin(a) * r * (o.h / o.w);
+      if (i === 0) c.moveTo(px, py); else c.lineTo(px, py);
+    }
+    c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = '#1a1030';
+    c.beginPath(); c.moveTo(-o.w * .16, -6); c.lineTo(-o.w * .04, 4); c.lineTo(-o.w * .16, 12); c.closePath(); c.fill();
+    c.beginPath(); c.moveTo(o.w * .16, -6); c.lineTo(o.w * .04, 4); c.lineTo(o.w * .16, 12); c.closePath(); c.fill();
+    c.beginPath(); c.ellipse(0, o.h * .22, o.w * .1, 5, 0, 0, 7); c.fill();
+    c.restore();
   }
   c.restore();
 }
@@ -301,10 +368,11 @@ addEventListener('keyup', e => {
 function update(dt) {
   if (estado !== 'jogando') return;
   t += dt;
-  vel = BASE_V;
+  vel = BASE_V * Math.pow(1.16, worldIdx);
   dist += vel * dt;
   if (invenc > 0) invenc -= dt;
   if (shake > 0) shake -= dt;
+  if (flashT > 0) flashT -= dt;
 
   // ---- movimento do Fagulha ----
   const ax = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
@@ -326,6 +394,7 @@ function update(dt) {
       portal.cruzado = true;
       worldIdx = portal.targetWorld;
       worldNameT = 2.4;
+      flashT = .5;
       burst(W / 2, PY, WORLDS[worldIdx].ring, 46, 240);
     }
     if (portal.y < -150) portal = null;
@@ -499,6 +568,7 @@ function desenhar() {
   c.globalAlpha = 1;
   desenharNomeMundo();
   c.restore();
+  if (flashT > 0) { c.fillStyle = `rgba(255,255,255,${clamp(flashT / .5, 0, 1)})`; c.fillRect(0, 0, W, H); }
   hud();
   telas();
 }
