@@ -142,11 +142,39 @@ let amb = [], ambT = .4, ufo = null, ufoT = rnd(6, 12);
 let portal = null, proximoLimite = 250;   // portal = { y, targetWorld, t, cruzado }
 let flashT = 0;
 
+/* ---------- poderes ---------- */
+const DASH_CD_MAX = 3, WIND_CD_MAX = 4.5, DASH_DUR = .22;
+let dashCD = 0, dashing = false, dashT = 0, dashDir = 1;
+let windCD = 0, windGustT = 0, windFailT = 0;
+
 function resetar() {
   estado = 'jogando'; t = 0; dist = 0; vidas = 3; invenc = 0; cristais = 0; shake = 0;
   jog.x = W / 2; jog.vx = 0; obst = []; gems = []; fx = []; spawnT = 1; gemT = 1;
   worldIdx = 0; worldNameT = 0; amb = []; ambT = .4; ufo = null; ufoT = rnd(6, 12);
   portal = null; proximoLimite = 250; flashT = 0;
+  dashCD = 0; dashing = false; dashT = 0; dashDir = 1;
+  windCD = 0; windGustT = 0; windFailT = 0;
+}
+
+/* ---------- poderes: dash e vento ---------- */
+function tryDash() {
+  if (dashCD > 0 || dashing) return;
+  dashDir = keys.left ? -1 : keys.right ? 1 : jog.dir;
+  dashing = true; dashT = DASH_DUR; dashCD = DASH_CD_MAX;
+  burst(jog.x, PY, '#ffe9a8', 14, 200);
+}
+function tryWind() {
+  if (windCD > 0) return;
+  windCD = WIND_CD_MAX;
+  windGustT = .5;
+  if (worldIdx === 3) { windFailT = 1.2; return; }
+  for (const o of obst) {
+    if (o.flung || o.morto) continue;
+    o.flung = true;
+    o.fvx = (Math.random() < .5 ? -1 : 1) * rnd(220, 340);
+    o.fvy = rnd(160, 300);
+    o.frot = 0; o.frotv = rnd(-8, 8);
+  }
 }
 
 /* ---------- obstáculos: um tipo diferente por mundo ---------- */
@@ -157,6 +185,7 @@ function criarObstaculo() {
 
 function desenharObstaculo(o) {
   c.save(); c.translate(o.x, o.y);
+  if (o.flung) c.rotate(o.frot);
   if (o.tp === 'lixo') {
     // sacos de lixo jogados na floresta
     c.fillStyle = '#3a3f46'; c.strokeStyle = '#1c1f24'; c.lineWidth = 2.4;
@@ -358,6 +387,8 @@ addEventListener('keydown', e => {
   if (estado !== 'jogando') { if (k === 'Space' || k === 'Enter' || k === 'KeyR') resetar(); return; }
   if (k === 'ArrowLeft' || k === 'KeyA') keys.left = true;
   if (k === 'ArrowRight' || k === 'KeyD') keys.right = true;
+  if (k === 'Space' && !e.repeat) tryDash();
+  if (k === 'KeyV' && !e.repeat) tryWind();
 });
 addEventListener('keyup', e => {
   if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
@@ -373,11 +404,21 @@ function update(dt) {
   if (invenc > 0) invenc -= dt;
   if (shake > 0) shake -= dt;
   if (flashT > 0) flashT -= dt;
+  if (dashCD > 0) dashCD -= dt;
+  if (windCD > 0) windCD -= dt;
+  if (windGustT > 0) windGustT -= dt;
+  if (windFailT > 0) windFailT -= dt;
 
   // ---- movimento do Fagulha ----
   const ax = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
   if (ax) jog.dir = ax;
-  jog.vx += (ax * 300 - jog.vx) * Math.min(1, dt * 10);
+  if (dashing) {
+    dashT -= dt;
+    jog.vx = dashDir * 1400;
+    if (dashT <= 0) dashing = false;
+  } else {
+    jog.vx += (ax * 300 - jog.vx) * Math.min(1, dt * 10);
+  }
   jog.x = clamp(jog.x + jog.vx * dt, 34, W - 34);
 
   // ---- portal negro: nasce a cada 250 m, o mundo só troca quando o Fagulha o atravessa ----
@@ -424,9 +465,14 @@ function update(dt) {
     spawnT = 1.0;
   }
   for (const o of obst) {
-    o.y -= vel * dt;
+    if (o.flung) { o.x += o.fvx * dt; o.y += o.fvy * dt; o.frot += o.frotv * dt; }
+    else o.y -= vel * dt;
   }
-  obst = obst.filter(o => o.y > -80 && !o.morto);
+  obst = obst.filter(o => {
+    if (o.morto) return false;
+    if (o.flung) return o.y < H + 160 && o.x > -160 && o.x < W + 160;
+    return o.y > -80;
+  });
 
   // ---- cristais ----
   gemT -= dt;
@@ -444,7 +490,7 @@ function update(dt) {
     if (o.morto) continue;
     const ox = o.x - o.w * .42, oy = o.y - o.h * .42, ow = o.w * .84, oh = o.h * .84;
     if (hb.x < ox + ow && hb.x + hb.w > ox && hb.y < oy + oh && hb.y + hb.h > oy) {
-      if (imune || invenc > 0) continue;
+      if (imune || invenc > 0 || dashing) continue;
       levarDano(o);
       break;
     }
@@ -568,6 +614,15 @@ function desenhar() {
   c.globalAlpha = 1;
   desenharNomeMundo();
   c.restore();
+  if (windGustT > 0) {
+    c.save(); c.globalAlpha = clamp(windGustT / .5, 0, 1) * .5;
+    c.strokeStyle = '#bfe8ff'; c.lineWidth = 3;
+    for (let i = 0; i < 10; i++) {
+      const x = (i * 47 + t * 400) % (W + 80) - 40;
+      c.beginPath(); c.moveTo(x, -10); c.lineTo(x - 30, H + 10); c.stroke();
+    }
+    c.restore();
+  }
   if (flashT > 0) { c.fillStyle = `rgba(255,255,255,${clamp(flashT / .5, 0, 1)})`; c.fillRect(0, 0, W, H); }
   hud();
   telas();
@@ -587,6 +642,46 @@ function hud() {
   c.fillStyle = 'rgba(0,0,0,.45)'; c.fillRect(W - 14, 44, 6, 140);
   c.fillStyle = '#7CFF9E'; c.fillRect(W - 14, 44, 6, 140 * pr);
   texto(Math.floor(dist / 10) + ' m', W - 11, 196, 8, '#fff', 'right');
+  if (estado === 'jogando') desenharPoderes();
+}
+
+/* ---------- ícones de poderes (recarga) ---------- */
+function drawIconDash() {
+  c.strokeStyle = '#ffe9a8'; c.lineWidth = 3; c.lineCap = 'round';
+  c.beginPath(); c.moveTo(-10, 6); c.lineTo(2, 6); c.lineTo(-2, -6); c.lineTo(10, -6); c.stroke();
+}
+function drawIconWind() {
+  c.strokeStyle = '#7af6ff'; c.lineWidth = 2.6; c.lineCap = 'round';
+  c.beginPath(); c.moveTo(-10, -4); c.quadraticCurveTo(6, -8, 8, -2); c.stroke();
+  c.beginPath(); c.moveTo(-10, 2); c.quadraticCurveTo(8, -2, 10, 6); c.stroke();
+}
+function desenharPoderes() {
+  const y = H - 34;
+  const itens = [
+    { x: W / 2 - 46, label: 'ESPAÇO', cd: dashCD, max: DASH_CD_MAX, draw: drawIconDash },
+    { x: W / 2 + 46, label: 'V', cd: windCD, max: WIND_CD_MAX, draw: drawIconWind }
+  ];
+  for (const it of itens) {
+    c.save(); c.translate(it.x, y);
+    c.fillStyle = 'rgba(10,10,24,.6)'; c.beginPath(); c.arc(0, 0, 22, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(255,255,255,.25)'; c.lineWidth = 2; c.stroke();
+    it.draw();
+    if (it.cd > 0) {
+      const frac = it.cd / it.max;
+      c.fillStyle = 'rgba(0,0,0,.65)';
+      c.beginPath(); c.moveTo(0, 0); c.arc(0, 0, 22, -Math.PI / 2, -Math.PI / 2 + frac * 6.283); c.closePath(); c.fill();
+      c.fillStyle = '#fff'; c.font = 'bold 11px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(it.cd.toFixed(1), 0, 0);
+    }
+    c.restore();
+    c.fillStyle = '#fff'; c.font = '10px sans-serif'; c.textAlign = 'center';
+    c.fillText(it.label, it.x, y + 34);
+  }
+  if (windFailT > 0) {
+    c.save(); c.globalAlpha = clamp(windFailT / 1.2, 0, 1);
+    texto('SEM AR NO ESPAÇO!', W / 2, y - 42, 8, '#ff9a4d');
+    c.restore();
+  }
 }
 
 function telas() {
